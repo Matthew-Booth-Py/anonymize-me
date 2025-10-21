@@ -2,18 +2,11 @@
 
 from __future__ import annotations
 
-import os
-
+import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
 
 from .anonymizer import build_replacement_provider
-from .openai_client import create_client
 from .processors.email_processor import anonymize_eml
-from .prompting import load_prompt_template
-
-# Load environment variables from .env file
-load_dotenv()
 
 
 def build_app() -> None:
@@ -26,42 +19,142 @@ def build_app() -> None:
     )
 
     with st.sidebar:
-        st.header("OpenAI configuration")
-        env_key_set = bool(os.getenv("OPENAI_API_KEY"))
-        api_key_help = (
-            "Overrides the OPENAI_API_KEY environment variable."
-            if env_key_set
-            else "Required: set OPENAI_API_KEY in .env file or enter here."
+        st.header("About")
+        st.info(
+            "🔒 **Using Presidio for PII Detection**\n\n"
+            "- Works offline - no API keys required\n"
+            "- Powered by spaCy NLP models\n"
+            "- Supports 17+ entity types"
         )
-        api_key = st.text_input(
-            "API key",
-            type="password",
-            help=api_key_help,
-            placeholder="sk-..."
-            if not env_key_set
-            else "Using OPENAI_API_KEY from environment",
-        )
-        model = st.text_input("Model", value="gpt-4o-mini")
 
     uploaded_file = st.file_uploader(
         "Email file", type=["eml"], accept_multiple_files=False
     )
 
+    # Entity type selection table
+    st.subheader("Select Entity Types to Anonymize")
+
+    # Define entity types with descriptions
+    entity_data = [
+        {
+            "Entity Type": "PERSON",
+            "Description": "A person's full name (first, middle, last etc)",
+        },
+        {
+            "Entity Type": "EMAIL_ADDRESS",
+            "Description": "An email address (RFC-822 style)",
+        },
+        {"Entity Type": "PHONE_NUMBER", "Description": "A telephone number"},
+        {
+            "Entity Type": "LOCATION",
+            "Description": "Geographic locations (cities/provinces/countries/regions)",
+        },
+        {
+            "Entity Type": "CREDIT_CARD",
+            "Description": "A credit card number (12-19 digits)",
+        },
+        {
+            "Entity Type": "US_SSN",
+            "Description": "US Social Security Number (9 digits)",
+        },
+        {"Entity Type": "DATE_TIME", "Description": "Absolute or relative dates/times"},
+        {
+            "Entity Type": "URL",
+            "Description": "A URL pointing to a resource on the Internet",
+        },
+        {"Entity Type": "IP_ADDRESS", "Description": "An IP address (IPv4 or IPv6)"},
+        {
+            "Entity Type": "CRYPTO",
+            "Description": "Cryptocurrency wallet number (Bitcoin addresses)",
+        },
+        {
+            "Entity Type": "IBAN_CODE",
+            "Description": "International Bank Account Number (IBAN)",
+        },
+        {
+            "Entity Type": "NRP",
+            "Description": "Nationality, religious or political group",
+        },
+        {"Entity Type": "MEDICAL_LICENSE", "Description": "A medical licence number"},
+        {
+            "Entity Type": "US_BANK_NUMBER",
+            "Description": "A US bank account number (8-17 digits)",
+        },
+        {
+            "Entity Type": "US_DRIVER_LICENSE",
+            "Description": "A US driver's licence number",
+        },
+        {
+            "Entity Type": "US_ITIN",
+            "Description": "US Individual Taxpayer ID (9 digits, starts with 9)",
+        },
+        {"Entity Type": "US_PASSPORT", "Description": "US passport number (9 digits)"},
+    ]
+
+    # Default selections (most common PII types)
+    default_selected = {
+        "PERSON",
+        "EMAIL_ADDRESS",
+        "PHONE_NUMBER",
+        "LOCATION",
+        "US_SSN",
+        "CREDIT_CARD",
+    }
+
+    # Add checkboxes to each row
+    df = pd.DataFrame(entity_data)
+    df.insert(0, "Select", df["Entity Type"].isin(default_selected))
+
+    # Display as data editor with checkboxes
+    edited_df = st.data_editor(
+        df,
+        column_config={
+            "Select": st.column_config.CheckboxColumn(
+                "Select",
+                help="Check to anonymize this entity type",
+                default=False,
+            ),
+            "Entity Type": st.column_config.TextColumn(
+                "Entity Type",
+                disabled=True,
+            ),
+            "Description": st.column_config.TextColumn(
+                "Description",
+                disabled=True,
+                width="large",
+            ),
+        },
+        disabled=["Entity Type", "Description"],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    # Extract selected entity types
+    selected_entities = edited_df[edited_df["Select"]]["Entity Type"].tolist()
+
+    # Show selection summary
+    if selected_entities:
+        st.info(
+            f"✓ Selected {len(selected_entities)} entity type(s): {', '.join(selected_entities)}"
+        )
+    else:
+        st.warning("⚠️ No entity types selected. All entity types will be detected.")
+
     if not uploaded_file:
-        st.info("Select an .eml file to begin anonymizing.")
+        st.info("👆 Upload an .eml file to begin anonymizing.")
         return
 
-    prompt_template = load_prompt_template()
-
     if st.button("Anonymize", type="primary"):
+        # Use None if no entities selected (will detect all types)
+        entity_types_to_use = selected_entities if selected_entities else None
+
         try:
-            with st.spinner("Creating OpenAI client..."):
-                client = create_client(api_key or None)
+            with st.spinner("Initializing Presidio analyzer..."):
                 replacement_provider = build_replacement_provider(
-                    client, prompt_template, model=model
+                    entity_types=entity_types_to_use
                 )
 
-            with st.spinner("Anonymizing email and attachments..."):
+            with st.spinner("Analyzing and anonymizing email and attachments..."):
                 anonymized_bytes = anonymize_eml(
                     uploaded_file.getvalue(), replacement_provider
                 )
@@ -74,40 +167,6 @@ def build_app() -> None:
             )
 
             # Show debugging info
-            with st.expander(
-                "🔍 Debug Information - Click to verify PDF was anonymized"
-            ):
-                import email
-                from email import policy
-
-                original = email.message_from_bytes(
-                    uploaded_file.getvalue(), policy=policy.default
-                )
-                anonymized = email.message_from_bytes(
-                    anonymized_bytes, policy=policy.default
-                )
-
-                original_parts = list(original.walk())
-                anonymized_parts = list(anonymized.walk())
-
-                st.write(f"**Original email parts:** {len(original_parts)}")
-                st.write(f"**Anonymized email parts:** {len(anonymized_parts)}")
-
-                st.write("\n**Attachments in anonymized email:**")
-                for i, part in enumerate(anonymized_parts):
-                    filename = part.get_filename()
-                    if filename:
-                        payload = part.get_payload(decode=True)
-                        st.write(
-                            f"📎 Part {i}: **{filename}** ({part.get_content_type()})"
-                        )
-                        st.write(f"   - Size: {len(payload)} bytes")
-                        if filename.lower().endswith(".pdf"):
-                            # Verify PDF is actually anonymized by checking first bytes
-                            st.write(f"   - PDF header: `{payload[:50]}`")
-                            st.success(
-                                f"✅ This PDF is {len(payload)} bytes (anonymized version)"
-                            )
 
         except Exception as exc:  # noqa: BLE001 - display error to the user
             st.error(f"Failed to anonymize email: {exc}")
@@ -123,13 +182,4 @@ def build_app() -> None:
             mime="message/rfc822",
             type="primary",
             use_container_width=True,
-        )
-
-        st.warning(
-            "⚠️ Make sure to click the button ABOVE (not re-upload the original file)"
-        )
-
-        # Add a second verification after download button
-        st.info(
-            "**To verify the PDF was anonymized:**\n1. Download the file using the button above\n2. Open the .eml file\n3. Extract the PDF attachment\n4. Open the PDF - it should show 'Person B', 'Company X', etc."
         )

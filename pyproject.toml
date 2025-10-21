@@ -6,10 +6,16 @@ authors = [{ name = "Anonymize Me" }]
 requires-python = ">=3.11"
 dependencies = [
     "streamlit",
-    "openai>=1.0.0",
     "PyMuPDF>=1.23.0",
     "python-docx>=1.1.0",
-    "pydantic>=2.0.0",
-    "python-dotenv>=1.0.0",
     "pre-commit>=4.3.0",
+    "presidio-analyzer>=2.2.360",
+    "spacy>=3.8.7",
+    "beautifulsoup4>=4.12.0",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.0.1",
+    "pip>=25.2",
 ]

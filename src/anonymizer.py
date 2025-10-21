@@ -3,26 +3,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Protocol
 
-from openai import OpenAI
-from pydantic import BaseModel, Field
-
-
-class ReplacementPair(BaseModel):
-    """A single PII replacement mapping."""
-
-    original: str = Field(description="The original PII value to be replaced")
-    replacement: str = Field(description="The anonymized replacement value")
-
-
-class PIIReplacements(BaseModel):
-    """Pydantic model for PII replacement mappings."""
-
-    replacements: list[ReplacementPair] = Field(
-        default_factory=list, description="List of PII replacement mappings"
-    )
+from presidio_analyzer import AnalyzerEngine
 
 
 class ReplacementProvider(Protocol):
@@ -32,55 +15,46 @@ class ReplacementProvider(Protocol):
         """Return a dictionary mapping original PII to anonymized replacements."""
 
 
-@dataclass(slots=True)
-class OpenAIAnonymizer:
-    """OpenAI-based anonymizer using structured outputs with Pydantic."""
+class PresidioAnonymizer:
+    """Presidio-based anonymizer for PII detection with generic replacements."""
 
-    client: OpenAI
-    prompt_template: str
-    model: str = "gpt-4o-mini"
+    def __init__(self, entity_types: list[str] | None = None) -> None:
+        self.analyzer = AnalyzerEngine()
+        # Entity types to detect (None means detect all)
+        self.entity_types = entity_types
 
     def __call__(self, text: str, *, context: str | None = None) -> dict[str, str]:
+        """Generate PII replacement mappings for the given text.
+
+        Args:
+            text: The text to anonymize
+            context: Optional context about the source (ignored, kept for compatibility)
+
+        Returns:
+            Dictionary mapping original PII to anonymized replacements
+        """
         if not text or not text.strip():
             return {}
 
-        system_prompt = self.prompt_template.strip()
-        if context:
-            system_prompt = f"{system_prompt}\n\nContext: {context.strip()}"
+        # Analyze text to find PII
+        analyzer_results = self.analyzer.analyze(
+            text=text,
+            language="en",
+            entities=self.entity_types,  # Filter by selected entity types
+        )
 
-        try:
-            # Use structured outputs with Pydantic model
-            completion = self.client.beta.chat.completions.parse(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": text,
-                    },
-                ],
-                response_format=PIIReplacements,
-                temperature=0.3,  # Low temperature for consistent replacements
-            )
-
-            result = completion.choices[0].message.parsed
-
-            if result is None:
-                return {}
-
-            # Convert list of ReplacementPair to dict
-            replacements_dict = {
-                pair.original: pair.replacement for pair in result.replacements
-            }
-
-            return replacements_dict
-
-        except Exception:
-            # Silently return empty dict on error
+        if not analyzer_results:
             return {}
+
+        # Build replacement mappings using Presidio's generic format
+        replacements = {}
+        for result in analyzer_results:
+            original_text = text[result.start : result.end]
+            # Use Presidio's generic replacement format: <ENTITY_TYPE>
+            replacement_text = f"<{result.entity_type}>"
+            replacements[original_text] = replacement_text
+
+        return replacements
 
 
 def apply_replacements(text: str, replacements: dict[str, str]) -> str:
@@ -107,10 +81,12 @@ def apply_replacements(text: str, replacements: dict[str, str]) -> str:
 
 
 def build_replacement_provider(
-    client: OpenAI, prompt_template: str, model: str = "gpt-4o-mini"
+    entity_types: list[str] | None = None,
 ) -> ReplacementProvider:
-    """Return a callable that generates replacement mappings using OpenAI."""
-    anonymizer = OpenAIAnonymizer(
-        client=client, prompt_template=prompt_template, model=model
-    )
-    return anonymizer
+    """Return a callable that generates replacement mappings using Presidio.
+
+    Args:
+        entity_types: List of entity types to detect (e.g., ["PERSON", "EMAIL_ADDRESS"]).
+                     If None, all entity types will be detected.
+    """
+    return PresidioAnonymizer(entity_types=entity_types)
