@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import email
-import os
-import tempfile
 from email import policy
 from email.message import EmailMessage, Message
-from pathlib import Path
 
 from .docx_processor import DocxProcessor
 from .pdf_processor import PDFProcessor
