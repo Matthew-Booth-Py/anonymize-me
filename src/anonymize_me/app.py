@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import streamlit as st
 
-from .anonymizer import build_text_anonymizer
-from .email_processing import anonymize_eml
+from .anonymizer import build_replacement_provider
 from .openai_client import create_client
+from .processors.email_processor import anonymize_eml
 from .prompting import load_prompt_template
 
 
@@ -35,8 +35,8 @@ def build_app() -> None:
     if st.button("Anonymize", type="primary"):
         try:
             client = create_client(api_key or None)
-            text_anonymizer = build_text_anonymizer(client, prompt_template, model=model)
-            anonymized_bytes = anonymize_eml(uploaded_file.getvalue(), text_anonymizer)
+            replacement_provider = build_replacement_provider(client, prompt_template, model=model)
+            anonymized_bytes = anonymize_eml(uploaded_file.getvalue(), replacement_provider)
         except Exception as exc:  # noqa: BLE001 - display error to the user
             st.error(f"Failed to anonymize email: {exc}")
             return

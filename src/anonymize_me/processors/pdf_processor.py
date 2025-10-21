@@ -2,40 +2,49 @@
 
 from __future__ import annotations
 
-import io
 import re
 
 import fitz  # PyMuPDF
 
 from .types import AnonymizedAttachment
-from ..anonymizer import TextProvider
+from ..anonymizer import apply_replacements
 
 
 class PDFProcessor:
-    """Anonymize PDF files by finding and replacing text while preserving structure."""
+    """Anonymize PDF files using replacement mappings while preserving ALL metadata."""
 
-    def __init__(self, anonymize: TextProvider) -> None:
-        self._anonymize = anonymize
-
-    def anonymize(self, filename: str, payload: bytes) -> AnonymizedAttachment:
+    def anonymize(
+        self, 
+        filename: str, 
+        payload: bytes, 
+        replacements: dict[str, str]
+    ) -> AnonymizedAttachment:
+        """Anonymize PDF content while retaining ALL metadata and structure."""
         # Open the PDF from bytes
         doc = fitz.open(stream=payload, filetype="pdf")
 
         try:
-            # Process each page independently to maintain structure
+            # Process each page to apply replacements
             for page_num in range(len(doc)):
                 page = doc[page_num]
-                self._anonymize_page(page, page_num)
+                self._apply_replacements_to_page(page, replacements)
 
-            # Save with optimization to maintain structure
+            # Save with ALL metadata preserved - use incremental save settings
             anonymized_content = doc.tobytes(
-                garbage=4,  # Maximum garbage collection
-                deflate=True,  # Compress
-                clean=True,  # Clean unused objects
+                garbage=0,  # Don't remove anything
+                deflate=True,  # Compress streams
+                clean=False,  # Don't clean - preserves metadata
+                pretty=False,  # Compact output
+                ascii=False,  # Keep binary
+                linear=False,  # Don't linearize
+                no_new_id=True,  # Keep original document ID
             )
 
+            # Anonymize filename
+            anonymized_filename = apply_replacements(filename, replacements)
+
             return AnonymizedAttachment(
-                filename=filename,
+                filename=anonymized_filename,
                 content=anonymized_content,
                 maintype="application",
                 subtype="pdf",
@@ -43,121 +52,99 @@ class PDFProcessor:
         finally:
             doc.close()
 
-    def _anonymize_page(self, page: fitz.Page, page_num: int) -> None:
-        """Anonymize a single page by extracting and replacing text blocks."""
-        # Extract text with detailed position information
-        text_dict = page.get_text("dict")
-        blocks = text_dict.get("blocks", [])
-        
-        # Collect all text blocks for anonymization
-        text_blocks_info = []
-        
-        for block_idx, block in enumerate(blocks):
-            if block.get("type") == 0:  # Text block
-                # Extract text from this block
-                block_text_parts = []
-                for line in block.get("lines", []):
-                    line_text = ""
-                    for span in line.get("spans", []):
-                        line_text += span.get("text", "")
-                    if line_text:
-                        block_text_parts.append(line_text)
-                
-                block_text = "\n".join(block_text_parts)
-                if block_text.strip():
-                    text_blocks_info.append({
-                        "bbox": fitz.Rect(block["bbox"]),
-                        "original_text": block_text,
-                        "block": block,
-                    })
-        
-        # Anonymize each text block
-        for info in text_blocks_info:
-            original_text = info["original_text"]
-            bbox = info["bbox"]
-            
-            # Anonymize this text block
-            anonymized_text = self._anonymize(
-                original_text, 
-                context=f"PDF page {page_num + 1}"
-            )
-            
-            # Only process if text changed
-            if anonymized_text != original_text:
-                # Find individual word-level differences for precise replacement
-                self._replace_text_in_area(page, bbox, original_text, anonymized_text)
-
-    def _replace_text_in_area(
+    def _apply_replacements_to_page(
         self, 
         page: fitz.Page, 
-        area_bbox: fitz.Rect, 
-        original_text: str, 
-        anonymized_text: str
+        replacements: dict[str, str]
     ) -> None:
-        """Replace text within a specific area with high precision."""
-        # Find word-level differences
-        original_words = original_text.split()
-        anonymized_words = anonymized_text.split()
+        """Apply all replacements to a single page by rewriting text blocks."""
+        if not replacements:
+            return
+
+        # Get all text on page
+        page_text = page.get_text()
+        print(f"DEBUG PDF: Original page text preview: {page_text[:200]}...")
+
+        # Apply text replacements to the entire page text
+        modified_text = apply_replacements(page_text, replacements)
         
-        # Build list of replacement pairs
-        replacements = []
+        if modified_text == page_text:
+            print(f"DEBUG PDF: No changes needed for this page")
+            return
         
-        # Use a simple diff approach - find sequences that differ
-        i = 0
-        j = 0
-        while i < len(original_words) and j < len(anonymized_words):
-            if original_words[i] == anonymized_words[j]:
-                i += 1
-                j += 1
+        print(f"DEBUG PDF: Text was modified, rewriting page...")
+        
+        # Get detailed text with positions
+        blocks = page.get_text("dict")["blocks"]
+        
+        # Collect all replacements to make (don't modify yet)
+        text_replacements = []
+        
+        # Process each text block to find what needs replacing
+        for block in blocks:
+            if block.get("type") == 0:  # Text block
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        original_text = span.get("text", "")
+                        if not original_text:
+                            continue
+                        
+                        # Apply replacements to this span's text
+                        new_text = apply_replacements(original_text, replacements)
+                        
+                        if new_text != original_text:
+                            # Get the bounding box for this span
+                            bbox = fitz.Rect(span["bbox"])
+                            fontsize = span.get("size", 11)
+                            fontname = span.get("font", "helv")
+                            
+                            # Map PDF font names to PyMuPDF font names
+                            if "bold" in fontname.lower():
+                                fontname = "helb"
+                            elif "italic" in fontname.lower():
+                                fontname = "heli"
+                            else:
+                                fontname = "helv"
+                            
+                            text_replacements.append({
+                                "bbox": bbox,
+                                "original": original_text,
+                                "new": new_text,
+                                "fontsize": fontsize,
+                                "fontname": fontname
+                            })
+        
+        if not text_replacements:
+            print(f"DEBUG PDF: No span-level replacements needed")
+            return
+        
+        print(f"DEBUG PDF: Found {len(text_replacements)} spans to replace")
+        
+        # Step 1: Add all redaction annotations
+        for item in text_replacements:
+            page.add_redact_annot(item["bbox"], fill=(1, 1, 1))
+        
+        # Step 2: Apply all redactions at once
+        page.apply_redactions(images=0)
+        print(f"DEBUG PDF: Applied all redactions")
+        
+        # Step 3: Insert all replacement text
+        for item in text_replacements:
+            result = page.insert_textbox(
+                item["bbox"],
+                item["new"],
+                fontsize=item["fontsize"],
+                fontname=item["fontname"],
+                color=(0, 0, 0),
+                align=0,  # left align
+            )
+            if result < 0:
+                print(f"DEBUG PDF: Failed to insert '{item['new']}' (result={result})")
             else:
-                # Collect differing segment
-                orig_segment = []
-                anon_segment = []
-                
-                # Look for next matching word
-                match_found = False
-                for look_ahead in range(1, min(10, len(original_words) - i, len(anonymized_words) - j)):
-                    if original_words[i + look_ahead:i + look_ahead + 1] == anonymized_words[j + look_ahead:j + look_ahead + 1]:
-                        orig_segment = original_words[i:i + look_ahead]
-                        anon_segment = anonymized_words[j:j + look_ahead]
-                        i += look_ahead
-                        j += look_ahead
-                        match_found = True
-                        break
-                
-                if not match_found:
-                    # Take single word if no match found
-                    if i < len(original_words):
-                        orig_segment = [original_words[i]]
-                        i += 1
-                    if j < len(anonymized_words):
-                        anon_segment = [anonymized_words[j]]
-                        j += 1
-                
-                if orig_segment and anon_segment:
-                    orig_phrase = " ".join(orig_segment)
-                    anon_phrase = " ".join(anon_segment)
-                    if orig_phrase != anon_phrase:
-                        replacements.append((orig_phrase, anon_phrase))
+                print(f"DEBUG PDF: Inserted '{item['new']}' -> '{item['original']}'")
         
-        # Apply replacements using redaction with careful positioning
-        for original_phrase, anonymized_phrase in replacements:
-            # Search for this phrase only within the specified area
-            text_instances = page.search_for(original_phrase, clip=area_bbox)
-            
-            for inst in text_instances:
-                # Use redaction to replace text
-                # Get font information from the area to maintain consistency
-                page.add_redact_annot(
-                    inst, 
-                    text=anonymized_phrase,
-                    fontname="helv",  # Use Helvetica for consistency
-                    fontsize=0,  # Auto-size to fit
-                    fill=(1, 1, 1),  # White background
-                    text_color=(0, 0, 0),  # Black text
-                    align=fitz.TEXT_ALIGN_LEFT,
-                )
+        print(f"DEBUG PDF: Completed {len(text_replacements)} span replacements")
         
-        # Apply redactions only once per page (called externally)
-        if replacements:
-            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+        # Verify
+        final_text = page.get_text()
+        print(f"DEBUG PDF: Final page text: {final_text[:200]}...")

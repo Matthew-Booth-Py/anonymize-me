@@ -2,53 +2,127 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 
 from openai import OpenAI
+from pydantic import BaseModel, Field
 
 
-class TextProvider(Protocol):
-    """Protocol describing callables that anonymize chunks of text."""
+class ReplacementPair(BaseModel):
+    """A single PII replacement mapping."""
+    
+    original: str = Field(description="The original PII value to be replaced")
+    replacement: str = Field(description="The anonymized replacement value")
 
-    def __call__(self, text: str, *, context: str | None = None) -> str:
-        """Return the anonymized version of ``text``."""
+
+class PIIReplacements(BaseModel):
+    """Pydantic model for PII replacement mappings."""
+    
+    replacements: list[ReplacementPair] = Field(
+        default_factory=list,
+        description="List of PII replacement mappings"
+    )
+
+
+class ReplacementProvider(Protocol):
+    """Protocol describing callables that generate PII replacement mappings."""
+
+    def __call__(self, text: str, *, context: str | None = None) -> dict[str, str]:
+        """Return a dictionary mapping original PII to anonymized replacements."""
 
 
 @dataclass(slots=True)
 class OpenAIAnonymizer:
-    """Thin wrapper around the OpenAI Responses API for anonymization."""
+    """OpenAI-based anonymizer using structured outputs with Pydantic."""
 
     client: OpenAI
     prompt_template: str
     model: str = "gpt-4o-mini"
 
-    def __call__(self, text: str, *, context: str | None = None) -> str:
-        if not text:
-            return ""
+    def __call__(self, text: str, *, context: str | None = None) -> dict[str, str]:
+        if not text or not text.strip():
+            return {}
 
         system_prompt = self.prompt_template.strip()
         if context:
             system_prompt = f"{system_prompt}\n\nContext: {context.strip()}"
 
-        response = self.client.responses.create(
-            model=self.model,
-            input=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": text,
-                },
-            ],
-        )
-        return response.output_text.strip()
+        try:
+            # Use structured outputs with Pydantic model
+            completion = self.client.beta.chat.completions.parse(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                    },
+                    {
+                        "role": "user",
+                        "content": text,
+                    },
+                ],
+                response_format=PIIReplacements,
+                temperature=0.3,  # Low temperature for consistent replacements
+            )
+            
+            result = completion.choices[0].message.parsed
+            
+            if result is None:
+                print("DEBUG: No parsed result from OpenAI")
+                return {}
+            
+            # Convert list of ReplacementPair to dict
+            replacements_dict = {pair.original: pair.replacement for pair in result.replacements}
+            
+            print(f"DEBUG: Replacements generated: {replacements_dict}")
+            
+            return replacements_dict
+            
+        except Exception as e:
+            print(f"DEBUG: Error calling OpenAI: {e}")
+            return {}
 
 
-def build_text_anonymizer(client: OpenAI, prompt_template: str, model: str = "gpt-4o-mini") -> TextProvider:
-    """Return a callable that anonymizes text using OpenAI."""
+def apply_replacements(text: str, replacements: dict[str, str]) -> str:
+    """Apply replacement mappings to text, preserving structure and formatting.
+    
+    Replacements are applied in order of longest key first to avoid partial replacements.
+    """
+    if not replacements or not text:
+        return text
+    
+    # Sort by length (longest first) to avoid partial replacements
+    sorted_items = sorted(replacements.items(), key=lambda x: len(x[0]), reverse=True)
+    
+    result = text
+    replacements_made = 0
+    
+    for original, replacement in sorted_items:
+        if original in result:
+            # Use regex with word boundaries for more accurate replacement
+            # Escape special regex characters in the original string
+            pattern = re.escape(original)
+            before_count = result.count(original)
+            result = re.sub(pattern, replacement, result)
+            after_count = result.count(original)
+            if before_count > after_count:
+                replacements_made += 1
+                print(f"DEBUG apply_replacements: Replaced '{original}' -> '{replacement}' ({before_count} times)")
+    
+    if replacements_made == 0:
+        print(f"DEBUG apply_replacements: No replacements made. Text preview: {text[:100]}...")
+        print(f"DEBUG apply_replacements: Looking for keys like: {list(replacements.keys())[:3]}")
+    
+    return result
 
+
+def build_replacement_provider(
+    client: OpenAI, 
+    prompt_template: str, 
+    model: str = "gpt-4o-mini"
+) -> ReplacementProvider:
+    """Return a callable that generates replacement mappings using OpenAI."""
     anonymizer = OpenAIAnonymizer(client=client, prompt_template=prompt_template, model=model)
     return anonymizer
