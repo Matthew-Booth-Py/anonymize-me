@@ -3,26 +3,11 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections import defaultdict
 from typing import Protocol
 
-from openai import OpenAI
-from pydantic import BaseModel, Field
-
-
-class ReplacementPair(BaseModel):
-    """A single PII replacement mapping."""
-
-    original: str = Field(description="The original PII value to be replaced")
-    replacement: str = Field(description="The anonymized replacement value")
-
-
-class PIIReplacements(BaseModel):
-    """Pydantic model for PII replacement mappings."""
-
-    replacements: list[ReplacementPair] = Field(
-        default_factory=list, description="List of PII replacement mappings"
-    )
+from presidio_analyzer import AnalyzerEngine
+from presidio_anonymizer import AnonymizerEngine
 
 
 class ReplacementProvider(Protocol):
@@ -32,55 +17,105 @@ class ReplacementProvider(Protocol):
         """Return a dictionary mapping original PII to anonymized replacements."""
 
 
-@dataclass(slots=True)
-class OpenAIAnonymizer:
-    """OpenAI-based anonymizer using structured outputs with Pydantic."""
+class PresidioAnonymizer:
+    """Presidio-based anonymizer for PII detection and replacement."""
 
-    client: OpenAI
-    prompt_template: str
-    model: str = "gpt-4o-mini"
+    def __init__(self, entity_types: list[str] | None = None) -> None:
+        self.analyzer = AnalyzerEngine()
+        self.anonymizer = AnonymizerEngine()
+        # Track entity counts for consistent naming (Person A, Person B, etc.)
+        self.entity_counters = defaultdict(int)
+        self.entity_cache = {}  # Cache original -> replacement mappings
+        # Entity types to detect (None means detect all)
+        self.entity_types = entity_types
 
     def __call__(self, text: str, *, context: str | None = None) -> dict[str, str]:
+        """Generate PII replacement mappings for the given text.
+
+        Args:
+            text: The text to anonymize
+            context: Optional context about the source (ignored, kept for compatibility)
+
+        Returns:
+            Dictionary mapping original PII to anonymized replacements
+        """
         if not text or not text.strip():
             return {}
 
-        system_prompt = self.prompt_template.strip()
-        if context:
-            system_prompt = f"{system_prompt}\n\nContext: {context.strip()}"
+        # Analyze text to find PII
+        analyzer_results = self.analyzer.analyze(
+            text=text,
+            language="en",
+            entities=self.entity_types,  # Filter by selected entity types
+        )
 
-        try:
-            # Use structured outputs with Pydantic model
-            completion = self.client.beta.chat.completions.parse(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": text,
-                    },
-                ],
-                response_format=PIIReplacements,
-                temperature=0.3,  # Low temperature for consistent replacements
-            )
-
-            result = completion.choices[0].message.parsed
-
-            if result is None:
-                return {}
-
-            # Convert list of ReplacementPair to dict
-            replacements_dict = {
-                pair.original: pair.replacement for pair in result.replacements
-            }
-
-            return replacements_dict
-
-        except Exception:
-            # Silently return empty dict on error
+        if not analyzer_results:
             return {}
+
+        # Build replacement mappings with consistent, readable names
+        replacements = {}
+
+        for result in analyzer_results:
+            original_text = text[result.start : result.end]
+
+            # Skip if we already have a replacement for this text
+            if original_text in self.entity_cache:
+                replacements[original_text] = self.entity_cache[original_text]
+                continue
+
+            # Generate replacement based on entity type
+            replacement = self._generate_replacement(result.entity_type, original_text)
+
+            # Cache the mapping
+            self.entity_cache[original_text] = replacement
+            replacements[original_text] = replacement
+
+        return replacements
+
+    def _generate_replacement(self, entity_type: str, original: str) -> str:
+        """Generate a readable replacement for a PII entity."""
+        # Increment counter for this entity type
+        self.entity_counters[entity_type] += 1
+        count = self.entity_counters[entity_type]
+
+        # Generate replacement based on type
+        if entity_type == "PERSON":
+            return f"Person {chr(64 + count)}"  # Person A, Person B, etc.
+        elif entity_type == "EMAIL_ADDRESS":
+            return f"person{chr(96 + count)}@example.com"  # persona@, personb@, etc.
+        elif entity_type == "PHONE_NUMBER":
+            return f"555-000-{count:04d}"
+        elif entity_type == "LOCATION":
+            return f"City {chr(64 + count)}"
+        elif entity_type in ("US_SSN", "UK_NHS"):
+            return "XXX-XX-XXXX"
+        elif entity_type == "CREDIT_CARD":
+            return "XXXX-XXXX-XXXX-XXXX"
+        elif entity_type == "IBAN_CODE":
+            return "XX00 0000 0000 0000"
+        elif entity_type == "IP_ADDRESS":
+            return "0.0.0.0"
+        elif entity_type == "DATE_TIME":
+            return "XXXX-XX-XX"
+        elif entity_type == "NRP":  # Nationality/Religion/Political group
+            return f"Group {chr(64 + count)}"
+        elif entity_type == "US_DRIVER_LICENSE":
+            return "XXXXXXXX"
+        elif entity_type == "CRYPTO":
+            return "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"  # Generic crypto address
+        elif entity_type == "MEDICAL_LICENSE":
+            return "MED-XXXXXX"
+        elif entity_type == "URL":
+            return "https://example.com"
+        elif entity_type == "US_BANK_NUMBER":
+            return "XXXXXXXXXX"
+        elif entity_type == "US_ITIN":
+            return "9XX-XX-XXXX"
+        elif entity_type == "US_PASSPORT":
+            return "XXXXXXXXX"
+        else:
+            # Generic replacement for unknown types
+            return f"[REDACTED-{entity_type}]"
 
 
 def apply_replacements(text: str, replacements: dict[str, str]) -> str:
@@ -107,10 +142,12 @@ def apply_replacements(text: str, replacements: dict[str, str]) -> str:
 
 
 def build_replacement_provider(
-    client: OpenAI, prompt_template: str, model: str = "gpt-4o-mini"
+    entity_types: list[str] | None = None,
 ) -> ReplacementProvider:
-    """Return a callable that generates replacement mappings using OpenAI."""
-    anonymizer = OpenAIAnonymizer(
-        client=client, prompt_template=prompt_template, model=model
-    )
-    return anonymizer
+    """Return a callable that generates replacement mappings using Presidio.
+    
+    Args:
+        entity_types: List of entity types to detect (e.g., ["PERSON", "EMAIL_ADDRESS"]).
+                     If None, all entity types will be detected.
+    """
+    return PresidioAnonymizer(entity_types=entity_types)

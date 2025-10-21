@@ -7,17 +7,28 @@ import uuid
 import fitz  # PyMuPDF
 
 from .types import AnonymizedAttachment
+from ..anonymizer import ReplacementProvider
 
 
 class PDFProcessor:
-    """Anonymize PDF files using replacement mappings while preserving ALL metadata."""
+    """Anonymize PDF files using Presidio while preserving ALL metadata."""
 
-    def anonymize(
-        self, filename: str, payload: bytes, replacements: dict[str, str]
-    ) -> AnonymizedAttachment:
+    def __init__(self, replacement_provider: ReplacementProvider) -> None:
+        self._replacement_provider = replacement_provider
+
+    def anonymize(self, filename: str, payload: bytes) -> AnonymizedAttachment:
         """Anonymize PDF content while retaining ALL metadata and structure."""
         # Open the PDF from bytes
         doc = fitz.open(stream=payload, filetype="pdf")
+        
+        # Extract all text from the PDF for Presidio analysis
+        full_text = ""
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            full_text += page.get_text()
+        
+        # Use Presidio to generate replacements
+        replacements = self._replacement_provider(full_text, context="PDF attachment")
 
         try:
             # Process each page to apply replacements

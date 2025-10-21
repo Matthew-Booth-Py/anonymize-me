@@ -15,15 +15,16 @@ from ..anonymizer import ReplacementProvider, apply_replacements
 
 class EmailProcessor:
     """
-    Process and anonymize EML files using a two-pass approach:
-    1. Extract all content and generate replacement mappings
-    2. Apply replacements to email structure and attachments
+    Process and anonymize EML files using Presidio:
+    - Email body/headers are analyzed and anonymized
+    - Each attachment (PDF, DOCX) analyzes its own content with Presidio
+    - The same ReplacementProvider instance ensures consistent replacements across all parts
     """
 
     def __init__(self, replacement_provider: ReplacementProvider) -> None:
         self._replacement_provider = replacement_provider
-        self._pdf_processor = PDFProcessor()
-        self._docx_processor = DocxProcessor()
+        self._pdf_processor = PDFProcessor(replacement_provider)
+        self._docx_processor = DocxProcessor(replacement_provider)
 
     def anonymize(self, raw_eml: bytes) -> bytes:
         """Anonymize an email and all its attachments."""
@@ -242,14 +243,10 @@ class EmailProcessor:
             lowered = filename.lower()
 
             if lowered.endswith(".pdf"):
-                return self._pdf_processor.anonymize(
-                    filename, payload_bytes, replacements
-                )
+                return self._pdf_processor.anonymize(filename, payload_bytes)
 
             if lowered.endswith(".docx") or lowered.endswith(".doc"):
-                return self._docx_processor.anonymize(
-                    filename, payload_bytes, replacements
-                )
+                return self._docx_processor.anonymize(filename, payload_bytes)
 
         # Default: treat as text if possible
         try:
