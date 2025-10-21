@@ -6,9 +6,12 @@ Guidelines:
 - Names → Generic names (Person A, Person B, etc.)
 - Email addresses → Generic emails (persona@example.com, personb@example.com)
 - Phone numbers → Generic numbers (555-000-0000, 555-000-0001)
+- Street addresses → Generic addresses (123 Generic Street, City A, State B, 12345)
+- Zip Codes 
+- Cities and locations → Generic locations (City A, City B)
 - Companies/Organizations → Generic names (Company X, Organization Y)
-- Locations/Addresses → Generic locations (City A, 123 Generic Street)
-- Keep abbreviations like CT, VT, NYC as is unless they reveal sensitive information
+- Universities/Schools → Generic names (University A, High School B)
+- ZIP/Postal codes can be kept or genericized (00000, 11111, etc.)
 
 Ensure replacements are consistent - if "Matt" appears multiple times, use the same replacement each time.
 If no PII is found, return an empty replacements dictionary.
