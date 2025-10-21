@@ -8,7 +8,7 @@ from .types import AnonymizedAttachment
 
 __all__ = [
     "DocxProcessor",
-    "EmailProcessor", 
+    "EmailProcessor",
     "PDFProcessor",
     "anonymize_eml",
     "anonymize_text_payload",

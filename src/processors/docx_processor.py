@@ -18,10 +18,7 @@ class DocxProcessor:
     """Anonymize Microsoft Word ``.docx`` files using replacement mappings."""
 
     def anonymize(
-        self, 
-        filename: str, 
-        payload: bytes, 
-        replacements: dict[str, str]
+        self, filename: str, payload: bytes, replacements: dict[str, str]
     ) -> AnonymizedAttachment:
         """Anonymize DOCX content while preserving all formatting and metadata."""
         document = Document(io.BytesIO(payload))
@@ -32,10 +29,10 @@ class DocxProcessor:
         # Save with all metadata preserved
         buffer = io.BytesIO()
         document.save(buffer)
-        
+
         # Generate random filename
         random_filename = f"{uuid.uuid4().hex[:12]}.docx"
-        
+
         return AnonymizedAttachment(
             filename=random_filename,
             content=buffer.getvalue(),
@@ -44,9 +41,7 @@ class DocxProcessor:
         )
 
     def _apply_replacements_to_document(
-        self, 
-        document: DocumentType, 
-        replacements: dict[str, str]
+        self, document: DocumentType, replacements: dict[str, str]
     ) -> None:
         """Apply replacements to all text elements in the document in a single pass."""
         if not replacements:
@@ -65,15 +60,13 @@ class DocxProcessor:
             # Header paragraphs
             for paragraph in section.header.paragraphs:
                 self._apply_replacements_to_paragraph(paragraph, replacements)
-            
+
             # Footer paragraphs
             for paragraph in section.footer.paragraphs:
                 self._apply_replacements_to_paragraph(paragraph, replacements)
 
     def _apply_replacements_to_paragraph(
-        self, 
-        paragraph: Paragraph, 
-        replacements: dict[str, str]
+        self, paragraph: Paragraph, replacements: dict[str, str]
     ) -> None:
         """Apply replacements to all runs in a paragraph."""
         for run in paragraph.runs:
@@ -81,9 +74,7 @@ class DocxProcessor:
                 run.text = apply_replacements(run.text, replacements)
 
     def _apply_replacements_to_table(
-        self, 
-        table: Table, 
-        replacements: dict[str, str]
+        self, table: Table, replacements: dict[str, str]
     ) -> None:
         """Apply replacements to all cells in a table."""
         for row in table.rows:
@@ -91,7 +82,7 @@ class DocxProcessor:
                 # Process all paragraphs in the cell
                 for paragraph in cell.paragraphs:
                     self._apply_replacements_to_paragraph(paragraph, replacements)
-                
+
                 # Process nested tables (tables within cells)
                 for nested_table in cell.tables:
                     self._apply_replacements_to_table(nested_table, replacements)

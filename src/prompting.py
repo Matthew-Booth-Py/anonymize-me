@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-PROMPT_TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "prompt_template.txt"
+PROMPT_TEMPLATE_PATH = (
+    Path(__file__).resolve().parent / "templates" / "prompt_template.txt"
+)
 
 
 def load_prompt_template() -> str:

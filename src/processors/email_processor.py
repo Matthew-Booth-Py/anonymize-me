@@ -29,30 +29,29 @@ class EmailProcessor:
         """Anonymize an email and all its attachments."""
         # Parse the original email
         original = email.message_from_bytes(raw_eml, policy=policy.default)
-        
+
         # Step 1: Extract all text content from email for replacement mapping
         all_text = self._extract_all_text(original)
-        
+
         # Step 2: Generate replacement mappings using LLM
         replacements = self._replacement_provider(
-            all_text, 
-            context="Complete email with all attachments"
+            all_text, context="Complete email with all attachments"
         )
-        
+
         # Step 3: Apply replacements to create anonymized email
         anonymized = self._clone_and_anonymize(original, replacements)
-        
+
         return anonymized.as_bytes()
 
     def _extract_all_text(self, message: Message) -> str:
         """Extract all text content from email including headers and attachments."""
         text_parts = []
-        
+
         # Extract headers
         for header, value in message.items():
             if value:
                 text_parts.append(f"{header}: {value}")
-        
+
         # Extract body and attachments
         if message.is_multipart():
             for part in message.iter_parts():
@@ -65,7 +64,7 @@ class EmailProcessor:
                     text_parts.append(payload)
             except Exception:
                 pass
-        
+
         return "\n\n".join(filter(None, text_parts))
 
     def _extract_part_text(self, part: Message) -> str:
@@ -76,38 +75,39 @@ class EmailProcessor:
             for subpart in part.iter_parts():
                 parts.append(self._extract_part_text(subpart))
             return "\n".join(filter(None, parts))
-        
+
         maintype = part.get_content_maintype()
-        
+
         # Extract text content
         if maintype == "text":
             try:
                 return part.get_content()
             except Exception:
                 return ""
-        
+
         # For binary attachments, try to extract text if possible
         filename = part.get_filename()
         if filename:
             try:
                 payload_bytes = part.get_payload(decode=True) or b""
                 lowered = filename.lower()
-                
+
                 # Extract text from PDF
                 if lowered.endswith(".pdf"):
                     return self._extract_pdf_text(payload_bytes)
-                
+
                 # For other types, just note the filename
                 return f"Attachment: {filename}"
             except Exception:
                 return f"Attachment: {filename}"
-        
+
         return ""
 
     def _extract_pdf_text(self, payload: bytes) -> str:
         """Extract text from PDF for replacement mapping generation."""
         try:
             import fitz
+
             doc = fitz.open(stream=payload, filetype="pdf")
             try:
                 text_parts = []
@@ -121,18 +121,18 @@ class EmailProcessor:
             return ""
 
     def _clone_and_anonymize(
-        self, 
-        message: Message, 
-        replacements: dict[str, str]
+        self, message: Message, replacements: dict[str, str]
     ) -> EmailMessage:
         """Clone message structure and apply replacements."""
         clone = EmailMessage()
-        
+
         # Copy and anonymize headers (skip Content-Type as it's set by make_mixed/set_content)
         for header, value in message.items():
             if header.lower() == "content-type":
                 continue
-            anonymized_value = apply_replacements(value, replacements) if value else value
+            anonymized_value = (
+                apply_replacements(value, replacements) if value else value
+            )
             clone[header] = anonymized_value
 
         # Process content
@@ -171,7 +171,9 @@ class EmailProcessor:
                     if message.get_content_subtype() == "html":
                         clone.add_alternative(sanitized, subtype="html")
                     else:
-                        clone.set_content(sanitized, subtype=message.get_content_subtype())
+                        clone.set_content(
+                            sanitized, subtype=message.get_content_subtype()
+                        )
             except Exception:
                 # If content extraction fails, skip
                 pass
@@ -179,9 +181,7 @@ class EmailProcessor:
         return clone
 
     def _process_part(
-        self, 
-        part: Message, 
-        replacements: dict[str, str]
+        self, part: Message, replacements: dict[str, str]
     ) -> EmailMessage | AnonymizedAttachment:
         """Process a message part (body or attachment) with replacements."""
         if part.is_multipart():
@@ -196,26 +196,28 @@ class EmailProcessor:
             try:
                 import uuid
                 from pathlib import Path
-                
+
                 payload = part.get_content()
                 sanitized = apply_replacements(payload, replacements)
                 charset = part.get_content_charset() or "utf-8"
-                
+
                 # Generate random filename, preserve extension
                 ext = Path(filename).suffix or ".txt"
                 random_filename = f"{uuid.uuid4().hex[:12]}{ext}"
-                
+
                 message = EmailMessage()
                 message.set_content(sanitized, subtype=subtype, charset=charset)
                 disposition = part.get_content_disposition() or "attachment"
-                message.add_header("Content-Disposition", disposition, filename=random_filename)
+                message.add_header(
+                    "Content-Disposition", disposition, filename=random_filename
+                )
                 if part.get("Content-ID"):
                     message["Content-ID"] = part["Content-ID"]
                 return message
             except Exception:
                 # Fall through to default handling
                 pass
-        
+
         # If it's text without a filename, it's the message body - return it as EmailMessage
         if maintype == "text":
             try:
@@ -238,29 +240,31 @@ class EmailProcessor:
         if filename:
             payload_bytes = part.get_payload(decode=True) or b""
             lowered = filename.lower()
-            
+
             if lowered.endswith(".pdf"):
-                return self._pdf_processor.anonymize(filename, payload_bytes, replacements)
-            
+                return self._pdf_processor.anonymize(
+                    filename, payload_bytes, replacements
+                )
+
             if lowered.endswith(".docx") or lowered.endswith(".doc"):
-                return self._docx_processor.anonymize(filename, payload_bytes, replacements)
+                return self._docx_processor.anonymize(
+                    filename, payload_bytes, replacements
+                )
 
         # Default: treat as text if possible
         try:
             payload_text = part.get_content()
             return anonymize_text_payload(
-                filename or "attachment.txt", 
-                payload_text, 
-                replacements
+                filename or "attachment.txt", payload_text, replacements
             )
         except Exception:
             # If all else fails, return as-is with random filename
             import uuid
             from pathlib import Path
-            
+
             ext = Path(filename).suffix if filename else ".bin"
             random_filename = f"{uuid.uuid4().hex[:12]}{ext}"
-            
+
             return AnonymizedAttachment(
                 filename=random_filename,
                 content=part.get_payload(decode=True) or b"",
@@ -273,4 +277,3 @@ def anonymize_eml(raw_eml: bytes, replacement_provider: ReplacementProvider) -> 
     """Convenience wrapper around EmailProcessor."""
     processor = EmailProcessor(replacement_provider)
     return processor.anonymize(raw_eml)
-

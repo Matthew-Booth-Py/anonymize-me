@@ -13,10 +13,7 @@ class PDFProcessor:
     """Anonymize PDF files using replacement mappings while preserving ALL metadata."""
 
     def anonymize(
-        self, 
-        filename: str, 
-        payload: bytes, 
-        replacements: dict[str, str]
+        self, filename: str, payload: bytes, replacements: dict[str, str]
     ) -> AnonymizedAttachment:
         """Anonymize PDF content while retaining ALL metadata and structure."""
         # Open the PDF from bytes
@@ -52,14 +49,12 @@ class PDFProcessor:
             doc.close()
 
     def _apply_replacements_to_page(
-        self, 
-        page: fitz.Page, 
-        replacements: dict[str, str]
+        self, page: fitz.Page, replacements: dict[str, str]
     ) -> None:
         """Apply all replacements to a single page using Helvetica font."""
         if not replacements:
             return
-        
+
         # Sort replacements by length (longest first) to avoid partial replacements
         sorted_replacements = sorted(
             replacements.items(), key=lambda item: len(item[0]), reverse=True
@@ -67,45 +62,47 @@ class PDFProcessor:
 
         # Track replacements to make
         replacements_to_apply = []
-        
+
         # For each replacement, find all instances in the text blocks
         for original, replacement in sorted_replacements:
             if not original or original == replacement:
                 continue
-            
+
             # Search for text instances and get their exact positions
             text_instances = page.search_for(original)
-            
+
             if not text_instances:
                 continue
-            
+
             # For each instance, store the rect for replacement
             for idx, rect in enumerate(text_instances):
-                replacements_to_apply.append({
-                    'rect': rect,
-                    'original': original,
-                    'replacement': replacement,
-                })
+                replacements_to_apply.append(
+                    {
+                        "rect": rect,
+                        "original": original,
+                        "replacement": replacement,
+                    }
+                )
 
         if not replacements_to_apply:
             return
-        
+
         # Add all redaction annotations with replacement text
         for item in replacements_to_apply:
-            rect = item['rect']
-            replacement = item['replacement']
-            original = item['original']
-            
+            rect = item["rect"]
+            replacement = item["replacement"]
+            original = item["original"]
+
             # Use Helvetica font and calculate size based on rect height
-            fontname = 'helv'
+            fontname = "helv"
             fontsize = rect.height * 0.7
-            
+
             # Calculate width ratio to adjust font size if replacement is longer
             if len(original) > 0:
                 width_ratio = len(replacement) / len(original)
                 if width_ratio > 1.2:  # Replacement is significantly longer
                     fontsize = fontsize / width_ratio
-            
+
             # Add redaction annotation with replacement text
             page.add_redact_annot(
                 rect,
@@ -114,8 +111,8 @@ class PDFProcessor:
                 fontsize=fontsize,
                 fill=(1, 1, 1),  # White background
                 text_color=(0, 0, 0),  # Black text
-                align=fitz.TEXT_ALIGN_LEFT
+                align=fitz.TEXT_ALIGN_LEFT,
             )
-        
+
         # Apply all redactions at once
         page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
