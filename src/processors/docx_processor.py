@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import uuid
 
 from docx import Document
 from docx.document import Document as DocumentType
@@ -32,11 +33,11 @@ class DocxProcessor:
         buffer = io.BytesIO()
         document.save(buffer)
         
-        # Anonymize filename
-        anonymized_filename = apply_replacements(filename, replacements)
+        # Generate random filename
+        random_filename = f"{uuid.uuid4().hex[:12]}.docx"
         
         return AnonymizedAttachment(
-            filename=anonymized_filename,
+            filename=random_filename,
             content=buffer.getvalue(),
             maintype="application",
             subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",

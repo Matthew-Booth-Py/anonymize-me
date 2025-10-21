@@ -36,16 +36,11 @@ class EmailProcessor:
         # Step 1: Extract all text content from email for replacement mapping
         all_text = self._extract_all_text(original)
         
-        print(f"DEBUG: Extracted text length: {len(all_text)}")
-        print(f"DEBUG: Extracted text preview: {all_text[:200]}")
-        
         # Step 2: Generate replacement mappings using LLM
         replacements = self._replacement_provider(
             all_text, 
             context="Complete email with all attachments"
         )
-        
-        print(f"DEBUG: Replacements generated: {replacements}")
         
         # Step 3: Apply replacements to create anonymized email
         anonymized = self._clone_and_anonymize(original, replacements)
@@ -202,14 +197,21 @@ class EmailProcessor:
         # Handle text parts (only if they have a filename - otherwise they're the body)
         if maintype == "text" and filename:
             try:
+                import uuid
+                from pathlib import Path
+                
                 payload = part.get_content()
                 sanitized = apply_replacements(payload, replacements)
                 charset = part.get_content_charset() or "utf-8"
-                anonymized_filename = apply_replacements(filename, replacements)
+                
+                # Generate random filename, preserve extension
+                ext = Path(filename).suffix or ".txt"
+                random_filename = f"{uuid.uuid4().hex[:12]}{ext}"
+                
                 message = EmailMessage()
                 message.set_content(sanitized, subtype=subtype, charset=charset)
                 disposition = part.get_content_disposition() or "attachment"
-                message.add_header("Content-Disposition", disposition, filename=anonymized_filename)
+                message.add_header("Content-Disposition", disposition, filename=random_filename)
                 if part.get("Content-ID"):
                     message["Content-ID"] = part["Content-ID"]
                 return message
@@ -255,10 +257,15 @@ class EmailProcessor:
                 replacements
             )
         except Exception:
-            # If all else fails, return as-is with anonymized filename
-            anonymized_filename = apply_replacements(filename or "attachment.bin", replacements)
+            # If all else fails, return as-is with random filename
+            import uuid
+            from pathlib import Path
+            
+            ext = Path(filename).suffix if filename else ".bin"
+            random_filename = f"{uuid.uuid4().hex[:12]}{ext}"
+            
             return AnonymizedAttachment(
-                filename=anonymized_filename,
+                filename=random_filename,
                 content=part.get_payload(decode=True) or b"",
                 maintype=maintype or "application",
                 subtype=subtype or "octet-stream",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from anonymize_me import build_app
+from src.app import build_app
 
 
 if __name__ == "__main__":

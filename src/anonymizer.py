@@ -70,18 +70,15 @@ class OpenAIAnonymizer:
             result = completion.choices[0].message.parsed
             
             if result is None:
-                print("DEBUG: No parsed result from OpenAI")
                 return {}
             
             # Convert list of ReplacementPair to dict
             replacements_dict = {pair.original: pair.replacement for pair in result.replacements}
             
-            print(f"DEBUG: Replacements generated: {replacements_dict}")
-            
             return replacements_dict
             
         except Exception as e:
-            print(f"DEBUG: Error calling OpenAI: {e}")
+            # Silently return empty dict on error
             return {}
 
 
@@ -104,16 +101,7 @@ def apply_replacements(text: str, replacements: dict[str, str]) -> str:
             # Use regex with word boundaries for more accurate replacement
             # Escape special regex characters in the original string
             pattern = re.escape(original)
-            before_count = result.count(original)
             result = re.sub(pattern, replacement, result)
-            after_count = result.count(original)
-            if before_count > after_count:
-                replacements_made += 1
-                print(f"DEBUG apply_replacements: Replaced '{original}' -> '{replacement}' ({before_count} times)")
-    
-    if replacements_made == 0:
-        print(f"DEBUG apply_replacements: No replacements made. Text preview: {text[:100]}...")
-        print(f"DEBUG apply_replacements: Looking for keys like: {list(replacements.keys())[:3]}")
     
     return result
 
