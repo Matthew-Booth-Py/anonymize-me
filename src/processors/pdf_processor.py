@@ -20,13 +20,13 @@ class PDFProcessor:
         """Anonymize PDF content while retaining ALL metadata and structure."""
         # Open the PDF from bytes
         doc = fitz.open(stream=payload, filetype="pdf")
-        
+
         # Extract all text from the PDF for Presidio analysis
         full_text = ""
         for page_num in range(len(doc)):
             page = doc[page_num]
             full_text += page.get_text()
-        
+
         # Use Presidio to generate replacements
         replacements = self._replacement_provider(full_text, context="PDF attachment")
 

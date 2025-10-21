@@ -33,37 +33,78 @@ def build_app() -> None:
 
     # Entity type selection table
     st.subheader("Select Entity Types to Anonymize")
-    
+
     # Define entity types with descriptions
     entity_data = [
-        {"Entity Type": "PERSON", "Description": "A person's full name (first, middle, last etc)"},
-        {"Entity Type": "EMAIL_ADDRESS", "Description": "An email address (RFC-822 style)"},
+        {
+            "Entity Type": "PERSON",
+            "Description": "A person's full name (first, middle, last etc)",
+        },
+        {
+            "Entity Type": "EMAIL_ADDRESS",
+            "Description": "An email address (RFC-822 style)",
+        },
         {"Entity Type": "PHONE_NUMBER", "Description": "A telephone number"},
-        {"Entity Type": "LOCATION", "Description": "Geographic locations (cities/provinces/countries/regions)"},
-        {"Entity Type": "CREDIT_CARD", "Description": "A credit card number (12-19 digits)"},
-        {"Entity Type": "US_SSN", "Description": "US Social Security Number (9 digits)"},
+        {
+            "Entity Type": "LOCATION",
+            "Description": "Geographic locations (cities/provinces/countries/regions)",
+        },
+        {
+            "Entity Type": "CREDIT_CARD",
+            "Description": "A credit card number (12-19 digits)",
+        },
+        {
+            "Entity Type": "US_SSN",
+            "Description": "US Social Security Number (9 digits)",
+        },
         {"Entity Type": "DATE_TIME", "Description": "Absolute or relative dates/times"},
-        {"Entity Type": "URL", "Description": "A URL pointing to a resource on the Internet"},
+        {
+            "Entity Type": "URL",
+            "Description": "A URL pointing to a resource on the Internet",
+        },
         {"Entity Type": "IP_ADDRESS", "Description": "An IP address (IPv4 or IPv6)"},
-        {"Entity Type": "CRYPTO", "Description": "Cryptocurrency wallet number (Bitcoin addresses)"},
-        {"Entity Type": "IBAN_CODE", "Description": "International Bank Account Number (IBAN)"},
-        {"Entity Type": "NRP", "Description": "Nationality, religious or political group"},
+        {
+            "Entity Type": "CRYPTO",
+            "Description": "Cryptocurrency wallet number (Bitcoin addresses)",
+        },
+        {
+            "Entity Type": "IBAN_CODE",
+            "Description": "International Bank Account Number (IBAN)",
+        },
+        {
+            "Entity Type": "NRP",
+            "Description": "Nationality, religious or political group",
+        },
         {"Entity Type": "MEDICAL_LICENSE", "Description": "A medical licence number"},
-        {"Entity Type": "US_BANK_NUMBER", "Description": "A US bank account number (8-17 digits)"},
-        {"Entity Type": "US_DRIVER_LICENSE", "Description": "A US driver's licence number"},
-        {"Entity Type": "US_ITIN", "Description": "US Individual Taxpayer ID (9 digits, starts with 9)"},
+        {
+            "Entity Type": "US_BANK_NUMBER",
+            "Description": "A US bank account number (8-17 digits)",
+        },
+        {
+            "Entity Type": "US_DRIVER_LICENSE",
+            "Description": "A US driver's licence number",
+        },
+        {
+            "Entity Type": "US_ITIN",
+            "Description": "US Individual Taxpayer ID (9 digits, starts with 9)",
+        },
         {"Entity Type": "US_PASSPORT", "Description": "US passport number (9 digits)"},
     ]
-    
+
     # Default selections (most common PII types)
     default_selected = {
-        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "LOCATION", "US_SSN", "CREDIT_CARD"
+        "PERSON",
+        "EMAIL_ADDRESS",
+        "PHONE_NUMBER",
+        "LOCATION",
+        "US_SSN",
+        "CREDIT_CARD",
     }
-    
+
     # Add checkboxes to each row
     df = pd.DataFrame(entity_data)
     df.insert(0, "Select", df["Entity Type"].isin(default_selected))
-    
+
     # Display as data editor with checkboxes
     edited_df = st.data_editor(
         df,
@@ -87,13 +128,15 @@ def build_app() -> None:
         hide_index=True,
         use_container_width=True,
     )
-    
+
     # Extract selected entity types
     selected_entities = edited_df[edited_df["Select"]]["Entity Type"].tolist()
-    
+
     # Show selection summary
     if selected_entities:
-        st.info(f"✓ Selected {len(selected_entities)} entity type(s): {', '.join(selected_entities)}")
+        st.info(
+            f"✓ Selected {len(selected_entities)} entity type(s): {', '.join(selected_entities)}"
+        )
     else:
         st.warning("⚠️ No entity types selected. All entity types will be detected.")
 
@@ -104,7 +147,7 @@ def build_app() -> None:
     if st.button("Anonymize", type="primary"):
         # Use None if no entities selected (will detect all types)
         entity_types_to_use = selected_entities if selected_entities else None
-        
+
         try:
             with st.spinner("Initializing Presidio analyzer..."):
                 replacement_provider = build_replacement_provider(
@@ -124,7 +167,6 @@ def build_app() -> None:
             )
 
             # Show debugging info
-            
 
         except Exception as exc:  # noqa: BLE001 - display error to the user
             st.error(f"Failed to anonymize email: {exc}")
@@ -141,5 +183,3 @@ def build_app() -> None:
             type="primary",
             use_container_width=True,
         )
-
-

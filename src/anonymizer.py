@@ -145,7 +145,7 @@ def build_replacement_provider(
     entity_types: list[str] | None = None,
 ) -> ReplacementProvider:
     """Return a callable that generates replacement mappings using Presidio.
-    
+
     Args:
         entity_types: List of entity types to detect (e.g., ["PERSON", "EMAIL_ADDRESS"]).
                      If None, all entity types will be detected.

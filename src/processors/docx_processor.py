@@ -20,15 +20,13 @@ class DocxProcessor:
     def __init__(self, replacement_provider: ReplacementProvider) -> None:
         self._replacement_provider = replacement_provider
 
-    def anonymize(
-        self, filename: str, payload: bytes
-    ) -> AnonymizedAttachment:
+    def anonymize(self, filename: str, payload: bytes) -> AnonymizedAttachment:
         """Anonymize DOCX content while preserving all formatting and metadata."""
         document = Document(io.BytesIO(payload))
-        
+
         # Extract all text from the document to analyze with Presidio
         full_text = self._extract_all_text(document)
-        
+
         # Use Presidio to generate replacements
         replacements = self._replacement_provider(full_text, context="DOCX attachment")
 
