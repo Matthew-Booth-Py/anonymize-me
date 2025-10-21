@@ -1,6 +1,5 @@
 """Test script to debug anonymization of email with PDF attachment."""
 
-from pathlib import Path
 from email import message_from_bytes
 
 # Import the processors
@@ -120,11 +119,8 @@ def main():
                         text += doc[page_num].get_text()
                     doc.close()
 
-                    print(f"\n   PDF Text Content (first 500 chars):")
-                    print(f"   {text[:500]}")
-
                     # Check for PII in PDF
-                    print(f"\n   PII CHECK IN PDF:")
+                    print("\n   PII CHECK IN PDF:")
                     pdf_pii_checks = [
                         ("Matthew Booth", "Should be replaced"),
                         ("Person A", "Should be present (replacement)"),
