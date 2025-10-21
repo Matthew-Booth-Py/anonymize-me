@@ -11,7 +11,8 @@ Streamlit application that scrubs PII from `.eml` email messages and their suppo
 
 ```bash
 uv sync
-uv run streamlit run main.py
+
+
 ```
 
 The application prompts for an OpenAI API key in the sidebar. You can also export `OPENAI_API_KEY` before launching the app.
@@ -19,7 +20,7 @@ The application prompts for an OpenAI API key in the sidebar. You can also expor
 ## How it works
 
 - Email bodies and headers are anonymized with the configured OpenAI model
-- PDF attachments are processed page by page using `pypdf` and re-rendered with `reportlab`
+- PDF attachments are processed using PyMuPDF (fitz), which directly edits the raw PDF content while preserving the original structure
 - Word attachments are rewritten in-place via `python-docx`
 
 Add new processors under `src/anonymize_me/processors/` to extend the supported file formats.

@@ -28,7 +28,10 @@ class EmailAnonymizer:
 
     def _clone_structure(self, message: Message) -> EmailMessage:
         clone = EmailMessage()
+        # Copy headers but skip Content-Type as it will be set by make_mixed() or set_content()
         for header, value in message.items():
+            if header.lower() == "content-type":
+                continue
             clone[header] = self._text_anonymizer(value, context=f"Email header: {header}") if value else value
 
         if message.is_multipart():
