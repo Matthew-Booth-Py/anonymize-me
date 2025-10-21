@@ -61,90 +61,70 @@ class PDFProcessor:
         if not replacements:
             return
 
-        # Get all text on page
-        page_text = page.get_text()
-        print(f"DEBUG PDF: Original page text preview: {page_text[:200]}...")
+        # Search for every replacement on the page. Using ``search_for`` ensures
+        # we catch matches that are split across multiple spans or text blocks
+        # (a common layout for PDF generators).
+        search_plan: list[tuple[fitz.Rect, str, str]] = []
 
-        # Apply text replacements to the entire page text
-        modified_text = apply_replacements(page_text, replacements)
-        
-        if modified_text == page_text:
-            print(f"DEBUG PDF: No changes needed for this page")
+        sorted_replacements = sorted(
+            replacements.items(), key=lambda item: len(item[0]), reverse=True
+        )
+
+        for original, replacement in sorted_replacements:
+            if not original or original == replacement:
+                continue
+
+            # ``search_for`` returns the bounding rectangles for each match. We
+            # normalise them to ``fitz.Rect`` instances for later processing.
+            matches = page.search_for(original)
+            if not matches:
+                continue
+
+            for match in matches:
+                search_plan.append((fitz.Rect(match), original, replacement))
+
+        if not search_plan:
+            print("DEBUG PDF: No matches found for replacements on this page")
             return
-        
-        print(f"DEBUG PDF: Text was modified, rewriting page...")
-        
-        # Get detailed text with positions
-        blocks = page.get_text("dict")["blocks"]
-        
-        # Collect all replacements to make (don't modify yet)
-        text_replacements = []
-        
-        # Process each text block to find what needs replacing
-        for block in blocks:
-            if block.get("type") == 0:  # Text block
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        original_text = span.get("text", "")
-                        if not original_text:
-                            continue
-                        
-                        # Apply replacements to this span's text
-                        new_text = apply_replacements(original_text, replacements)
-                        
-                        if new_text != original_text:
-                            # Get the bounding box for this span
-                            bbox = fitz.Rect(span["bbox"])
-                            fontsize = span.get("size", 11)
-                            fontname = span.get("font", "helv")
-                            
-                            # Map PDF font names to PyMuPDF font names
-                            if "bold" in fontname.lower():
-                                fontname = "helb"
-                            elif "italic" in fontname.lower():
-                                fontname = "heli"
-                            else:
-                                fontname = "helv"
-                            
-                            text_replacements.append({
-                                "bbox": bbox,
-                                "original": original_text,
-                                "new": new_text,
-                                "fontsize": fontsize,
-                                "fontname": fontname
-                            })
-        
-        if not text_replacements:
-            print(f"DEBUG PDF: No span-level replacements needed")
-            return
-        
-        print(f"DEBUG PDF: Found {len(text_replacements)} spans to replace")
-        
-        # Step 1: Add all redaction annotations
-        for item in text_replacements:
-            page.add_redact_annot(item["bbox"], fill=(1, 1, 1))
-        
-        # Step 2: Apply all redactions at once
+
+        print(f"DEBUG PDF: Preparing {len(search_plan)} redactions via search")
+
+        # Add redaction annotations for every match before applying them. This
+        # prevents us from mutating the page while still iterating over results.
+        for bbox, *_ in search_plan:
+            page.add_redact_annot(bbox, fill=(1, 1, 1))
+
         page.apply_redactions(images=0)
-        print(f"DEBUG PDF: Applied all redactions")
-        
-        # Step 3: Insert all replacement text
-        for item in text_replacements:
+        print("DEBUG PDF: Applied redactions from search plan")
+
+        # Reinsert the anonymised text in the cleared rectangles. Use the
+        # rectangle height to estimate a sensible font size so the replacement
+        # text fits within the original bounds.
+        for bbox, original, replacement in search_plan:
+            estimated_fontsize = max(bbox.height * 0.8, 6)
             result = page.insert_textbox(
-                item["bbox"],
-                item["new"],
-                fontsize=item["fontsize"],
-                fontname=item["fontname"],
+                bbox,
+                replacement,
+                fontsize=estimated_fontsize,
+                fontname="helv",
                 color=(0, 0, 0),
-                align=0,  # left align
+                align=0,
             )
             if result < 0:
-                print(f"DEBUG PDF: Failed to insert '{item['new']}' (result={result})")
+                print(
+                    f"DEBUG PDF: Fallback insert for '{replacement}' (result={result})"
+                )
+                page.insert_text(
+                    bbox.tl,
+                    replacement,
+                    fontsize=estimated_fontsize,
+                    fontname="helv",
+                    color=(0, 0, 0),
+                )
             else:
-                print(f"DEBUG PDF: Inserted '{item['new']}' -> '{item['original']}'")
-        
-        print(f"DEBUG PDF: Completed {len(text_replacements)} span replacements")
-        
-        # Verify
+                print(
+                    f"DEBUG PDF: Inserted replacement for '{original}' -> '{replacement}'"
+                )
+
         final_text = page.get_text()
         print(f"DEBUG PDF: Final page text: {final_text[:200]}...")

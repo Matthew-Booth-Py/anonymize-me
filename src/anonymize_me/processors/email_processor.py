@@ -145,7 +145,18 @@ class EmailProcessor:
 
         # Process content
         if message.is_multipart():
-            clone.make_mixed()
+            subtype = message.get_content_subtype()
+            if subtype == "alternative":
+                clone.make_alternative()
+            elif subtype == "related":
+                clone.make_related()
+            else:
+                clone.make_mixed()
+
+            if message.preamble:
+                clone.preamble = apply_replacements(message.preamble, replacements)
+            if message.epilogue:
+                clone.epilogue = apply_replacements(message.epilogue, replacements)
             for part in message.iter_parts():
                 processed_part = self._process_part(part, replacements)
                 if isinstance(processed_part, EmailMessage):
@@ -193,10 +204,14 @@ class EmailProcessor:
             try:
                 payload = part.get_content()
                 sanitized = apply_replacements(payload, replacements)
+                charset = part.get_content_charset() or "utf-8"
                 anonymized_filename = apply_replacements(filename, replacements)
                 message = EmailMessage()
-                message.set_content(sanitized, subtype=subtype)
-                message.add_header("Content-Disposition", "attachment", filename=anonymized_filename)
+                message.set_content(sanitized, subtype=subtype, charset=charset)
+                disposition = part.get_content_disposition() or "attachment"
+                message.add_header("Content-Disposition", disposition, filename=anonymized_filename)
+                if part.get("Content-ID"):
+                    message["Content-ID"] = part["Content-ID"]
                 return message
             except Exception:
                 # Fall through to default handling
@@ -207,8 +222,15 @@ class EmailProcessor:
             try:
                 payload = part.get_content()
                 sanitized = apply_replacements(payload, replacements)
+                charset = part.get_content_charset() or "utf-8"
                 message = EmailMessage()
-                message.set_content(sanitized, subtype=subtype)
+                message.set_content(sanitized, subtype=subtype, charset=charset)
+                for header in ("Content-ID", "Content-Location"):
+                    if part.get(header):
+                        message[header] = part[header]
+                disposition = part.get_content_disposition()
+                if disposition:
+                    message["Content-Disposition"] = disposition
                 return message
             except Exception:
                 pass
