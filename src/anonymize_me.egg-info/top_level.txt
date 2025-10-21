@@ -1,3 +1,0 @@
-anonymize_me
-templates
-types
