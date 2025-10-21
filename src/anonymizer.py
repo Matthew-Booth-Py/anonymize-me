@@ -78,7 +78,7 @@ class OpenAIAnonymizer:
 
             return replacements_dict
 
-        except Exception as e:
+        except Exception:
             # Silently return empty dict on error
             return {}
 
@@ -95,7 +95,6 @@ def apply_replacements(text: str, replacements: dict[str, str]) -> str:
     sorted_items = sorted(replacements.items(), key=lambda x: len(x[0]), reverse=True)
 
     result = text
-    replacements_made = 0
 
     for original, replacement in sorted_items:
         if original in result:
