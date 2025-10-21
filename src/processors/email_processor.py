@@ -121,6 +121,53 @@ class EmailProcessor:
         except Exception:
             return ""
 
+    def _anonymize_html(self, html: str, replacements: dict[str, str]) -> str:
+        """Anonymize text content within HTML while preserving HTML structure."""
+        if not replacements:
+            return html
+        
+        try:
+            from bs4 import BeautifulSoup, NavigableString
+            
+            # Parse HTML
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Find and replace text in all text nodes
+            for element in soup.descendants:
+                if isinstance(element, NavigableString):
+                    # Skip script and style tags
+                    if element.parent.name in ['script', 'style']:
+                        continue
+                    
+                    # Apply replacements to the text content
+                    original_text = str(element)
+                    anonymized_text = apply_replacements(original_text, replacements)
+                    
+                    # Replace the text node if it changed
+                    if anonymized_text != original_text:
+                        element.replace_with(NavigableString(anonymized_text))
+            
+            # Also anonymize certain attributes (href, src, etc.)
+            for tag in soup.find_all(True):  # Find all tags
+                for attr in ['href', 'src', 'content', 'value']:
+                    if tag.has_attr(attr):
+                        original_value = tag[attr]
+                        if isinstance(original_value, str):
+                            anonymized_value = apply_replacements(original_value, replacements)
+                            if anonymized_value != original_value:
+                                tag[attr] = anonymized_value
+            
+            # Return the modified HTML, preserving original format
+            return str(soup)
+        
+        except ImportError:
+            # If BeautifulSoup is not available, fall back to simple replacement
+            # This may break HTML, but it's better than nothing
+            return apply_replacements(html, replacements)
+        except Exception:
+            # If parsing fails, return original HTML
+            return html
+
     def _clone_and_anonymize(
         self, message: Message, replacements: dict[str, str]
     ) -> EmailMessage:
@@ -168,13 +215,15 @@ class EmailProcessor:
             try:
                 payload = message.get_content()
                 if isinstance(payload, str):
-                    sanitized = apply_replacements(payload, replacements)
-                    if message.get_content_subtype() == "html":
+                    subtype = message.get_content_subtype()
+                    
+                    # Anonymize based on content type
+                    if subtype == "html":
+                        sanitized = self._anonymize_html(payload, replacements)
                         clone.add_alternative(sanitized, subtype="html")
                     else:
-                        clone.set_content(
-                            sanitized, subtype=message.get_content_subtype()
-                        )
+                        sanitized = apply_replacements(payload, replacements)
+                        clone.set_content(sanitized, subtype=subtype)
             except Exception:
                 # If content extraction fails, skip
                 pass
@@ -223,8 +272,16 @@ class EmailProcessor:
         if maintype == "text":
             try:
                 payload = part.get_content()
-                sanitized = apply_replacements(payload, replacements)
                 charset = part.get_content_charset() or "utf-8"
+                
+                # Anonymize based on content type
+                if subtype == "html":
+                    # For HTML, parse and anonymize text nodes while preserving structure
+                    sanitized = self._anonymize_html(payload, replacements)
+                else:
+                    # For plain text and other types, apply direct replacement
+                    sanitized = apply_replacements(payload, replacements)
+                
                 message = EmailMessage()
                 message.set_content(sanitized, subtype=subtype, charset=charset)
                 for header in ("Content-ID", "Content-Location"):

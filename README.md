@@ -32,21 +32,23 @@ uv run streamlit run main.py
 This tool uses **Presidio** for PII detection and anonymization:
 
 - **PII Detection**: Uses Presidio's AnalyzerEngine powered by spaCy's `en_core_web_lg` model to detect 17+ entity types:
-  - Person names → `Person A`, `Person B`, etc.
-  - Email addresses → `persona@example.com`, `personb@example.com`, etc.
-  - Phone numbers → `555-000-0001`, `555-000-0002`, etc.
-  - Locations → `City A`, `City B`, etc.
-  - SSNs, credit cards, IP addresses, URLs, bank numbers, and more
+  - Person names → `<PERSON>`
+  - Email addresses → `<EMAIL_ADDRESS>`
+  - Phone numbers → `<PHONE_NUMBER>`
+  - Locations → `<LOCATION>`
+  - SSNs, credit cards, IP addresses, URLs, bank numbers, and more → `<ENTITY_TYPE>`
 
-- **Customizable Detection**: Select which entity types to anonymize via the sidebar (default: Person, Email, Phone, Location, SSN, Credit Card)
+- **Customizable Detection**: Select which entity types to anonymize via an interactive table (default: Person, Email, Phone, Location, SSN, Credit Card)
 
-- **Consistent Replacements**: The same PII value always gets the same replacement across all email parts and attachments
+- **Generic Replacements**: All detected PII is replaced with `<ENTITY_TYPE>` format (e.g., `<PERSON>`, `<EMAIL_ADDRESS>`)
 
 - **File Processing**:
-  - Email bodies and headers are anonymized using text replacement
-  - PDF attachments analyze their own content and apply redactions using PyMuPDF
-  - Word attachments analyze their own content and apply replacements via `python-docx`
-  - All attachments share the same replacement cache for consistency
+  - **Email bodies**: Plain text and HTML bodies are anonymized
+    - HTML: Text content and attributes (href, src, etc.) are anonymized while preserving HTML structure
+    - Plain text: Direct text replacement
+  - **PDF attachments**: Analyzed independently and redacted using PyMuPDF
+  - **DOCX attachments**: Analyzed independently with replacements applied via `python-docx`
+  - Each part is processed independently with generic entity type placeholders
 
 ## Extending
 

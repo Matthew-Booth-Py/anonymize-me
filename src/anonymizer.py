@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from typing import Protocol
 
 from presidio_analyzer import AnalyzerEngine
-from presidio_anonymizer import AnonymizerEngine
 
 
 class ReplacementProvider(Protocol):
@@ -18,14 +16,10 @@ class ReplacementProvider(Protocol):
 
 
 class PresidioAnonymizer:
-    """Presidio-based anonymizer for PII detection and replacement."""
+    """Presidio-based anonymizer for PII detection with generic replacements."""
 
     def __init__(self, entity_types: list[str] | None = None) -> None:
         self.analyzer = AnalyzerEngine()
-        self.anonymizer = AnonymizerEngine()
-        # Track entity counts for consistent naming (Person A, Person B, etc.)
-        self.entity_counters = defaultdict(int)
-        self.entity_cache = {}  # Cache original -> replacement mappings
         # Entity types to detect (None means detect all)
         self.entity_types = entity_types
 
@@ -52,70 +46,15 @@ class PresidioAnonymizer:
         if not analyzer_results:
             return {}
 
-        # Build replacement mappings with consistent, readable names
+        # Build replacement mappings using Presidio's generic format
         replacements = {}
-
         for result in analyzer_results:
             original_text = text[result.start : result.end]
-
-            # Skip if we already have a replacement for this text
-            if original_text in self.entity_cache:
-                replacements[original_text] = self.entity_cache[original_text]
-                continue
-
-            # Generate replacement based on entity type
-            replacement = self._generate_replacement(result.entity_type, original_text)
-
-            # Cache the mapping
-            self.entity_cache[original_text] = replacement
-            replacements[original_text] = replacement
+            # Use Presidio's generic replacement format: <ENTITY_TYPE>
+            replacement_text = f"<{result.entity_type}>"
+            replacements[original_text] = replacement_text
 
         return replacements
-
-    def _generate_replacement(self, entity_type: str, original: str) -> str:
-        """Generate a readable replacement for a PII entity."""
-        # Increment counter for this entity type
-        self.entity_counters[entity_type] += 1
-        count = self.entity_counters[entity_type]
-
-        # Generate replacement based on type
-        if entity_type == "PERSON":
-            return f"Person {chr(64 + count)}"  # Person A, Person B, etc.
-        elif entity_type == "EMAIL_ADDRESS":
-            return f"person{chr(96 + count)}@example.com"  # persona@, personb@, etc.
-        elif entity_type == "PHONE_NUMBER":
-            return f"555-000-{count:04d}"
-        elif entity_type == "LOCATION":
-            return f"City {chr(64 + count)}"
-        elif entity_type in ("US_SSN", "UK_NHS"):
-            return "XXX-XX-XXXX"
-        elif entity_type == "CREDIT_CARD":
-            return "XXXX-XXXX-XXXX-XXXX"
-        elif entity_type == "IBAN_CODE":
-            return "XX00 0000 0000 0000"
-        elif entity_type == "IP_ADDRESS":
-            return "0.0.0.0"
-        elif entity_type == "DATE_TIME":
-            return "XXXX-XX-XX"
-        elif entity_type == "NRP":  # Nationality/Religion/Political group
-            return f"Group {chr(64 + count)}"
-        elif entity_type == "US_DRIVER_LICENSE":
-            return "XXXXXXXX"
-        elif entity_type == "CRYPTO":
-            return "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"  # Generic crypto address
-        elif entity_type == "MEDICAL_LICENSE":
-            return "MED-XXXXXX"
-        elif entity_type == "URL":
-            return "https://example.com"
-        elif entity_type == "US_BANK_NUMBER":
-            return "XXXXXXXXXX"
-        elif entity_type == "US_ITIN":
-            return "9XX-XX-XXXX"
-        elif entity_type == "US_PASSPORT":
-            return "XXXXXXXXX"
-        else:
-            # Generic replacement for unknown types
-            return f"[REDACTED-{entity_type}]"
 
 
 def apply_replacements(text: str, replacements: dict[str, str]) -> str:
