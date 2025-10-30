@@ -12,6 +12,9 @@ dependencies = [
     "presidio-analyzer>=2.2.360",
     "spacy>=3.8.7",
     "beautifulsoup4>=4.12.0",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
 ]
 
 [dependency-groups]
